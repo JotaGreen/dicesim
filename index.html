@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>D20 Simulator</title>
     <style>
         /* --- CSS STYLING --- */
@@ -28,7 +28,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            pointer-events: none; /* Let clicks pass through to canvas if needed, though we handle buttons separately */
+            pointer-events: none; /* Let clicks pass through to canvas */
             display: flex;
             flex-direction: column;
             justify-content: space-between;
@@ -137,10 +137,11 @@
         }
     </style>
     
+    <!-- Import Maps for Three.js and Cannon-es -->
     <script type="importmap">
         {
             "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
                 "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
             }
         }
@@ -148,16 +149,21 @@
 </head>
 <body>
 
+    <!-- 3D Canvas Container -->
     <div id="canvas-container"></div>
 
+    <!-- UI Layer -->
     <div id="ui-layer">
+        <!-- Settings Button -->
         <button id="settings-btn" aria-label="Settings">⚙️</button>
         
+        <!-- Roll Button -->
         <div id="roll-btn-container">
             <button id="roll-btn">Roll</button>
         </div>
     </div>
 
+    <!-- Settings Modal -->
     <div id="settings-modal">
         <div class="modal-content">
             <h2>Dice Settings</h2>
@@ -169,6 +175,7 @@
         </div>
     </div>
 
+    <!-- Application Script -->
     <script type="module">
         import * as THREE from 'three';
         import * as CANNON from 'cannon-es';
@@ -182,11 +189,12 @@
                 light: 0xffffff
             },
             physics: {
-                gravity: -25,     // Strong gravity for snappy rolls
-                restitution: 0.5, // Bounciness
-                friction: 0.1
+                gravity: -35,     // Strong gravity for snappy rolls
+                restitution: 0.8, // Bounciness (0.0 - 1.0)
+                friction: 0.05    // Lower friction to let it slide/roll more
             },
-            diceRadius: 1.5
+            diceRadius: 1.5,
+            textureSize: 1024     // High res for crisp text
         };
 
         // --- GLOBAL VARIABLES ---
@@ -195,13 +203,8 @@
         let diceMesh = null;
         let diceBody = null;
         let floorBody;
-        
-        // Wall bodies array to keep track and update them on resize
         let walls = []; 
-
-        // State
-        let currentDiceType = 'standard'; // 'standard', 'blank', 'fixed'
-        let isRolling = false;
+        let currentDiceType = 'standard'; 
 
         // --- INITIALIZATION ---
         function init() {
@@ -212,84 +215,92 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(CONFIG.colors.board);
 
-            // 2. Setup Camera (Perspective, looking down)
+            // 2. Setup Camera
             const aspect = window.innerWidth / window.innerHeight;
             camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
-            // Position camera high up and slightly back to see the 3D depth
             camera.position.set(0, 30, 10); 
             camera.lookAt(0, 0, 0);
 
             // 3. Setup Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true; // Enable shadows
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             container.appendChild(renderer.domElement);
 
             // 4. Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
 
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(10, 20, 10);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            dirLight.position.set(10, 25, 10);
             dirLight.castShadow = true;
             dirLight.shadow.mapSize.width = 2048;
             dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 50;
+            // Optimize shadow camera bounds
+            dirLight.shadow.camera.left = -15;
+            dirLight.shadow.camera.right = 15;
+            dirLight.shadow.camera.top = 15;
+            dirLight.shadow.camera.bottom = -15;
             scene.add(dirLight);
 
-            // 5. Setup Physics World (Cannon-es)
+            // 5. Setup Physics World
             world = new CANNON.World();
             world.gravity.set(0, CONFIG.physics.gravity, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
             
             // Materials
-            const defaultMaterial = new CANNON.Material('default');
-            const defaultContactMaterial = new CANNON.ContactMaterial(defaultMaterial, defaultMaterial, {
+            const diceMaterial = new CANNON.Material('dice');
+            const floorMaterial = new CANNON.Material('floor');
+            
+            const contactMaterial = new CANNON.ContactMaterial(floorMaterial, diceMaterial, {
                 friction: CONFIG.physics.friction,
-                restitution: CONFIG.physics.restitution,
+                restitution: CONFIG.physics.restitution, // Bouncy!
+                contactEquationStiffness: 1e7,
+                contactEquationRelaxation: 3
             });
-            world.addContactMaterial(defaultContactMaterial);
+            
+            world.addContactMaterial(contactMaterial);
 
-            // 6. Create Floor (Physics only, visual is background color)
-            // Infinite plane at y=0
+            // 6. Create Floor
             const floorShape = new CANNON.Plane();
-            floorBody = new CANNON.Body({
-                mass: 0, // Static
-                material: defaultMaterial
-            });
+            floorBody = new CANNON.Body({ mass: 0, material: floorMaterial });
             floorBody.addShape(floorShape);
-            floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Rotate to be flat
+            floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
             world.addBody(floorBody);
             
-            // Shadow receiving plane (Visual only)
+            // Shadow Plane (Visual)
             const shadowPlaneGeo = new THREE.PlaneGeometry(100, 100);
-            const shadowPlaneMat = new THREE.ShadowMaterial({ opacity: 0.3 });
+            const shadowPlaneMat = new THREE.ShadowMaterial({ opacity: 0.4 });
             const shadowPlane = new THREE.Mesh(shadowPlaneGeo, shadowPlaneMat);
             shadowPlane.rotation.x = -Math.PI / 2;
             shadowPlane.receiveShadow = true;
             scene.add(shadowPlane);
 
-            // 7. Setup Walls based on screen size
-            updateWalls();
+            // 7. Setup Walls
+            // We use the same material logic for walls as floor to keep dice bouncing off them
+            updateWalls(floorMaterial);
 
             // 8. Event Listeners
-            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('resize', () => {
+                onWindowResize();
+                updateWalls(floorMaterial);
+            });
             document.getElementById('roll-btn').addEventListener('click', rollDice);
             setupUI();
 
             // 9. Start Loop
             animate();
-            console.log("Initialization Complete.");
+            console.log("System Ready.");
         }
 
-        // --- WALLS LOGIC ---
-        // We need invisible walls so the dice stays on screen.
-        // We calculate the visible width at y=0 (floor level) based on camera.
-        function updateWalls() {
-            // Remove old walls
+        function updateWalls(material) {
             walls.forEach(body => world.removeBody(body));
             walls = [];
 
-            // Calculate visible boundaries at y=0
-            // Math: tan(fov/2) * distance = height/2
             const dist = camera.position.y;
             const vFOV = THREE.MathUtils.degToRad(camera.fov);
             const visibleHeight = 2 * Math.tan(vFOV / 2) * dist;
@@ -297,43 +308,34 @@
 
             const w = visibleWidth / 2;
             const h = visibleHeight / 2;
-            const wallThickness = 5;
+            const thick = 5;
+            const height = 20;
 
-            // Material
-            const wallMat = new CANNON.Material();
-
-            // Create 4 walls (Left, Right, Top, Bottom)
-            // Note: Camera looks at 0,0,0. +Z is 'down' on screen (roughly), -Z is 'up'.
-            // Because camera is at (0,30,10) looking at (0,0,0), the view is tilted.
-            // We approximate walls around the center (0,0).
-            
-            const wallDefinitions = [
-                { pos: [w, 5, 0], size: [wallThickness, 10, h*2] },   // Right
-                { pos: [-w, 5, 0], size: [wallThickness, 10, h*2] },  // Left
-                { pos: [0, 5, -h], size: [w*2, 10, wallThickness] },  // Top (Far)
-                { pos: [0, 5, h], size: [w*2, 10, wallThickness] }    // Bottom (Near)
+            const wallDefs = [
+                { pos: [w + thick/2, height/2, 0], size: [thick, height, h*2.5] }, // Right
+                { pos: [-(w + thick/2), height/2, 0], size: [thick, height, h*2.5] }, // Left
+                { pos: [0, height/2, -(h + thick/2)], size: [w*2.5, height, thick] }, // Top
+                { pos: [0, height/2, h + thick/2], size: [w*2.5, height, thick] }  // Bottom
             ];
 
-            wallDefinitions.forEach(def => {
-                const shape = new CANNON.Box(new CANNON.Vec3(def.size[0], def.size[1], def.size[2]));
-                const body = new CANNON.Body({ mass: 0, material: wallMat });
+            wallDefs.forEach(def => {
+                const shape = new CANNON.Box(new CANNON.Vec3(def.size[0]/2, def.size[1]/2, def.size[2]/2));
+                const body = new CANNON.Body({ mass: 0, material: material });
                 body.position.set(...def.pos);
                 body.addShape(shape);
                 world.addBody(body);
                 walls.push(body);
             });
-            
-            // Debug: console.log(`Walls updated. Visible area: ${visibleWidth.toFixed(2)} x ${visibleHeight.toFixed(2)}`);
         }
 
-        // --- DICE GENERATION ---
+        // --- TEXTURE GENERATION ---
         
-        // Helper to draw text on canvas for texture
         function createDiceTexture(type) {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            const size = 512; // Texture resolution
-            // We will create a grid texture. 5 columns, 4 rows = 20 cells.
+            const size = CONFIG.textureSize;
+            
+            // Grid: 5 cols x 4 rows = 20 faces
             const cols = 5; 
             const rows = 4;
             const cellW = size / cols;
@@ -342,50 +344,52 @@
             canvas.width = size;
             canvas.height = size;
 
-            // Fill background (Red)
-            ctx.fillStyle = '#cc0000'; // Match CONFIG.colors.dice
+            // Fill Background
+            ctx.fillStyle = '#cc0000'; // Red
             ctx.fillRect(0, 0, size, size);
 
             if (type === 'blank') return new THREE.CanvasTexture(canvas);
 
-            // Draw numbers
+            // Text Settings
             ctx.fillStyle = CONFIG.colors.text;
-            ctx.font = 'bold 60px Arial'; // Adjust size
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            
+            // Font sizing: Needs to be small enough to fit inside the triangular slice
+            // The safe radius of an inscribed circle in our UV triangle is roughly cellW * 0.25
+            const fontSize = cellW * 0.35; 
+            ctx.font = `bold ${fontSize}px Arial`;
 
-            // D20 standard mapping is complex. We will map linearly 1-20
-            // and assign faces later.
             for (let i = 0; i < 20; i++) {
                 const col = i % cols;
                 const row = Math.floor(i / cols);
                 
-                const x = col * cellW + cellW / 2;
-                const y = row * cellH + cellH / 2;
+                const centerX = col * cellW + cellW / 2;
+                const centerY = row * cellH + cellH / 2;
 
-                // Debug grid lines (optional, commented out)
-                // ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.strokeRect(col*cellW, row*cellH, cellW, cellH);
-
-                let numberStr = (i + 1).toString();
-                if (type === 'fixed') numberStr = '20';
+                let num = (i + 1).toString();
+                if (type === 'fixed') num = '20';
                 
-                // 6 and 9 underline logic
-                if (numberStr === '6' || numberStr === '9') {
-                    numberStr += '.';
-                }
+                // Add dot for 6 and 9 to distinguish
+                if (num === '6' || num === '9') num += '.';
 
                 ctx.save();
-                ctx.translate(x, y);
-                // Randomly rotate text slightly for organic feel? No, keep it straight.
-                ctx.fillText(numberStr, 0, 0);
+                ctx.translate(centerX, centerY);
+                
+                // Optional: Debug Circle to check centering
+                // ctx.beginPath(); ctx.arc(0,0, cellW*0.2, 0, Math.PI*2); ctx.stroke();
+
+                ctx.fillText(num, 0, 0);
                 ctx.restore();
             }
 
-            return new THREE.CanvasTexture(canvas);
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.colorSpace = THREE.SRGBColorSpace; // Correct color profile
+            return tex;
         }
 
         function createDice() {
-            // Remove existing dice if any
+            // Cleanup
             if (diceMesh) {
                 scene.remove(diceMesh);
                 diceMesh.geometry.dispose();
@@ -395,170 +399,153 @@
                 diceBody = null;
             }
 
-            // 1. Geometry
-            // Icosahedron: Radius, Detail 0 = 20 faces.
-            const geomOriginal = new THREE.IcosahedronGeometry(CONFIG.diceRadius, 0);
-            
-            // To map textures to specific faces, we need non-indexed geometry (unique vertices per face)
-            const geometry = geomOriginal.toNonIndexed();
-            
-            // Calculate UVs to map to our grid texture
+            // 1. Geometry (Non-indexed for custom UVs per face)
+            const geometry = new THREE.IcosahedronGeometry(CONFIG.diceRadius, 0).toNonIndexed();
+            const pos = geometry.attributes.position;
             const uvs = geometry.attributes.uv;
-            const count = uvs.count; // Should be 20 faces * 3 verts = 60
             
-            const cols = 5; 
-            const rows = 4;
+            // 2. Map UVs to Grid
+            // We have 20 faces (60 vertices). 
+            // We map each 3-vertex face to the CENTER of a grid cell.
+            const cols = 5;
+            const uStep = 1 / cols;
+            const vStep = 1 / 4;
 
-            // Standard Icosahedron face order isn't strictly linear 1-20 in adjacency,
-            // but for a simulator we just need each face to show a unique number.
-            for (let i = 0; i < count; i += 3) {
-                const faceIndex = i / 3; // 0 to 19
+            for (let i = 0; i < pos.count; i += 3) {
+                const faceIndex = i / 3;
                 
-                // Determine grid cell for this face
+                // Calculate grid cell
                 const col = faceIndex % cols;
                 const row = Math.floor(faceIndex / cols);
 
-                // UV coordinates in grid (0..1)
-                // We want to map the triangle of the face to the center of the square grid cell.
-                // Simple mapping: Triangle fits inside the square box.
-                const uSize = 1 / cols;
-                const vSize = 1 / rows;
-                
-                const uBase = col * uSize;
-                const vBase = 1 - (row * vSize) - vSize; // Flip Y for canvas coords
+                // Center of the cell in UV space (0..1)
+                const cU = col * uStep + uStep / 2;
+                // Invert V because canvas Y is top-down, UV V is bottom-up
+                const cV = 1 - (row * vStep + vStep / 2);
 
-                // Triangle UVs centered in the box
-                // Top-Center, Bottom-Left, Bottom-Right (approximate for equilateral)
-                // We just need the number to be in the middle of the face.
-                
-                // Valid UV mapping for a triangle inside a square box:
-                // Vertex 0: (0.5, 0.9) relative to box
-                // Vertex 1: (0.1, 0.1) relative to box
-                // Vertex 2: (0.9, 0.1) relative to box
-                
-                // Note: The vertex order in Icosahedron determines orientation.
-                // We assign them generically.
-                
-                uvs.setXY(i,     uBase + 0.5 * uSize, vBase + 0.85 * vSize);
-                uvs.setXY(i + 1, uBase + 0.1 * uSize, vBase + 0.15 * vSize);
-                uvs.setXY(i + 2, uBase + 0.9 * uSize, vBase + 0.15 * vSize);
+                // We define a small equilateral triangle centered at (cU, cV)
+                // This triangle sits inside the square cell.
+                // Radius in UV space (approx half the width of the cell)
+                const r = uStep * 0.4; 
+
+                // Vertex 1: Top
+                uvs.setXY(i,     cU, cV + r);
+                // Vertex 2: Bottom Right
+                uvs.setXY(i + 1, cU + r * 0.866, cV - r * 0.5);
+                // Vertex 3: Bottom Left
+                uvs.setXY(i + 2, cU - r * 0.866, cV - r * 0.5);
             }
             
             geometry.attributes.uv.needsUpdate = true;
-            geometry.computeVertexNormals(); // Important for lighting
+            geometry.computeVertexNormals();
 
-            // 2. Material
-            const texture = createDiceTexture(currentDiceType);
+            // 3. Material
             const material = new THREE.MeshStandardMaterial({
-                map: texture,
+                map: createDiceTexture(currentDiceType),
                 color: 0xffffff,
-                roughness: 0.2,
-                metalness: 0.1,
-                flatShading: true // Gives the 'poly' look, not smooth sphere
+                roughness: 0.1, // Shiny
+                metalness: 0.0,
+                flatShading: true
             });
 
-            // 3. Mesh
             diceMesh = new THREE.Mesh(geometry, material);
             diceMesh.castShadow = true;
+            diceMesh.receiveShadow = true;
             scene.add(diceMesh);
 
-            // 4. Physics Body
-            // We use a ConvexPolyhedron for perfect collisions matching the mesh
-            // Wait - Cannon-es doesn't have a built-in Icosahedron helper, 
-            // but we can approximate it well enough with a Sphere for simple rolling
-            // OR use the vertices to build a hull.
-            // For a D20, a convex hull is best for true "stopping on a face".
-            
-            // Generating ConvexPolyhedron from Three.js Geometry vertices
+            // 4. Physics Body (Icosahedron Hull)
+            // Create vertices for Cannon
             const vertices = [];
-            const posAttr = geometry.attributes.position;
-            for(let i=0; i<posAttr.count; i++){
-                vertices.push(new CANNON.Vec3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)));
+            for (let i = 0; i < pos.count; i++) {
+                vertices.push(new CANNON.Vec3(pos.getX(i), pos.getY(i), pos.getZ(i)));
             }
             
-            // Indices (since it's non-indexed, we just list 0,1,2...)
+            // Create faces (simple 0,1,2 indexing because we are non-indexed)
             const faces = [];
-            for(let i=0; i<posAttr.count; i+=3){
+            for (let i = 0; i < pos.count; i += 3) {
                 faces.push([i, i+1, i+2]);
             }
 
-            // Note: Cannon needs merged vertices for performance usually, 
-            // but for one single die, raw non-indexed hull is usually okay if faces are defined.
-            // Actually, Cannon's ConvexPolyhedron requires unique vertices and indexed faces.
-            // Let's create a cleaner shape manually or use a simpler approximation.
-            // Simplest robust way for D20 without external hull generators:
-            // Use Cannon's Cylinder or Sphere? No, it won't land flat.
-            // Let's use the vertices of a standard Icosahedron (indexed).
+            // Note: ConvexPolyhedron requires unique vertices for stability usually, 
+            // but providing the full triangle list often works for simple shapes.
+            // For robustness, we fallback to the indexed vertices of a standard icosahedron
+            // to ensure the physics shape is perfectly watertight.
             
-            // Standard indexed vertices for Icosahedron (12 verts)
             const t = (1.0 + Math.sqrt(5.0)) / 2.0;
             const r = CONFIG.diceRadius; 
-            // Normalized then scaled
-            const vertsRaw = [
+            const rawVerts = [
                 [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
                 [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
                 [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]
-            ].map(v => {
-                const vec = new CANNON.Vec3(v[0], v[1], v[2]);
-                vec.normalize();
-                vec.scale(r, vec);
-                return vec;
-            });
+            ].map(v => new CANNON.Vec3(v[0], v[1], v[2]).scale(1/Math.sqrt(1+t*t) * r)); // Normalize & Scale
 
-            const facesRaw = [
+            const rawFaces = [
                 [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
                 [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
                 [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
                 [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]
             ];
 
-            const diceShape = new CANNON.ConvexPolyhedron({
-                vertices: vertsRaw,
-                faces: facesRaw
+            const shape = new CANNON.ConvexPolyhedron({
+                vertices: rawVerts,
+                faces: rawFaces
             });
 
+            // "Dice" material is already defined in contact material in init
+            const diceMat = world.defaultContactMaterial.materials[1]; 
+
             diceBody = new CANNON.Body({
-                mass: 1,
-                shape: diceShape,
-                linearDamping: 0.05,
-                angularDamping: 0.05
+                mass: 5, // Slightly heavier for stability
+                shape: shape,
+                material: diceMat,
+                linearDamping: 0.0,
+                angularDamping: 0.0
             });
             
             world.addBody(diceBody);
         }
 
-        // --- GAMEPLAY LOGIC ---
-
         function rollDice() {
-            console.log("Rolling...");
-            
-            // 1. Create new die
-            createDice();
+            if (!diceMesh) createDice();
+            else {
+                // Reset visual and physics if it exists
+                world.removeBody(diceBody);
+                createDice(); // Recreate to ensure clean state
+            }
 
-            // 2. Set Start Position (Bottom Center, off floor)
-            // Visible height check
+            console.log("Rolling...");
+
+            // 1. Position: Bottom Center, just above floor
+            // Get visible height to determine "bottom"
             const dist = camera.position.y;
             const vFOV = THREE.MathUtils.degToRad(camera.fov);
             const visibleHeight = 2 * Math.tan(vFOV / 2) * dist;
             
-            // Start slightly below center, but within view
-            diceBody.position.set(0, 5, visibleHeight/3); 
+            // Z positive is "bottom" of screen in this camera view
+            const startZ = visibleHeight * 0.4; 
+            diceBody.position.set(0, 3, startZ);
+            diceBody.velocity.set(0,0,0);
+            diceBody.angularVelocity.set(0,0,0);
+
+            // 2. Random Launch Forces
+            const force = 70; // Magnitude
             
-            // 3. Apply Force (Launch Upwards and slightly back/forward for randomness)
-            const forceY = 30 + Math.random() * 10; // Up
-            const forceZ = -(20 + Math.random() * 10); // Into the screen (Up on 2D)
-            const forceX = (Math.random() - 0.5) * 10; // Slight side wobble
+            // Random x spread
+            const rX = (Math.random() - 0.5) * 20; 
+            // Always throw UP (+y)
+            const rY = 50 + Math.random() * 20;
+            // Always throw AWAY (-z) towards center/top
+            const rZ = -(50 + Math.random() * 30);
 
-            // Apply Impulse (Force over time instant)
-            // Point of application is center of mass
-            diceBody.velocity.set(forceX, forceY, forceZ);
+            diceBody.velocity.set(rX, rY, rZ);
 
-            // 4. Apply Torque (Spin)
-            const torqueAmt = 15;
+            // 3. Random Spin (Torque)
+            // High spin makes it look realistic
+            const spin = 30;
             diceBody.angularVelocity.set(
-                (Math.random() - 0.5) * torqueAmt,
-                (Math.random() - 0.5) * torqueAmt,
-                (Math.random() - 0.5) * torqueAmt
+                (Math.random() - 0.5) * spin,
+                (Math.random() - 0.5) * spin,
+                (Math.random() - 0.5) * spin
             );
         }
 
@@ -566,16 +553,15 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            updateWalls();
         }
 
         function animate() {
             requestAnimationFrame(animate);
 
-            // Step physics
+            // Update Physics
             world.step(1 / 60);
 
-            // Sync visual mesh with physics body
+            // Sync
             if (diceMesh && diceBody) {
                 diceMesh.position.copy(diceBody.position);
                 diceMesh.quaternion.copy(diceBody.quaternion);
@@ -584,42 +570,27 @@
             renderer.render(scene, camera);
         }
 
-        // --- UI LOGIC ---
         function setupUI() {
             const settingsBtn = document.getElementById('settings-btn');
             const modal = document.getElementById('settings-modal');
             const closeBtn = document.getElementById('close-modal');
             const options = document.querySelectorAll('.option-btn[data-type]');
 
-            settingsBtn.addEventListener('click', () => {
-                modal.style.display = 'flex';
-            });
-
-            closeBtn.addEventListener('click', () => {
-                modal.style.display = 'none';
-            });
+            settingsBtn.addEventListener('click', () => { modal.style.display = 'flex'; });
+            closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
 
             options.forEach(btn => {
                 btn.addEventListener('click', (e) => {
-                    // Update Active State
                     options.forEach(b => b.classList.remove('active'));
                     e.target.classList.add('active');
-                    
-                    // Update Logic
                     currentDiceType = e.target.dataset.type;
-                    console.log(`Dice type set to: ${currentDiceType}`);
                 });
             });
             
-            // Close modal on outside click
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) modal.style.display = 'none';
-            });
+            modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
         }
 
-        // Start everything
         init();
-
     </script>
 </body>
 </html>
