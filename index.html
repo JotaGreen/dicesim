@@ -10,8 +10,8 @@
 
     <style>
         :root {
-            --primary-color: #4e8cff;
-            --bg-color: #1a1a1a;
+            --primary-color: #d32f2f; /* Red button to match dice */
+            --bg-color: #1e3b12;      /* Dark Green background */
             --text-color: #ffffff;
             --overlay-bg: rgba(0, 0, 0, 0.85);
         }
@@ -26,6 +26,7 @@
             margin: 0;
             padding: 0;
             background-color: var(--bg-color);
+            background: radial-gradient(circle at center, #2e5e2e 0%, #1e3b12 100%); /* Added subtle gradient */
             color: var(--text-color);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             overflow: hidden; /* Prevent scrolling */
@@ -91,7 +92,8 @@
             transform: translate(-50%, -50%);
             font-size: 6rem;
             font-weight: bold;
-            text-shadow: 0 4px 10px rgba(0,0,0,0.8);
+            color: white;
+            text-shadow: 0 4px 10px rgba(0,0,0,0.8); /* Fixed shadow */
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.2s ease-out;
@@ -115,14 +117,14 @@
             padding: 15px 60px;
             font-size: 1.5rem;
             font-weight: 600;
-            box-shadow: 0 4px 15px rgba(78, 140, 255, 0.4);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.4);
             cursor: pointer;
             transition: transform 0.1s, background-color 0.2s;
         }
 
         #roll-btn:active {
             transform: scale(0.95);
-            background-color: #3a75e0;
+            background-color: #b71c1c;
         }
 
         #roll-btn:disabled {
@@ -295,10 +297,10 @@
 
         // --- Configuration & State ---
         const config = {
-            rotationSpeedInitial: 0.5, // How fast it starts spinning
-            drag: 0.95,               // Deceleration factor (0.99 = slow stop, 0.90 = fast stop)
-            stopThreshold: 0.01,      // Speed at which we consider the dice "stopped"
-            snapSpeed: 0.1            // How fast it snaps to the nearest face at the end
+            rotationSpeedInitial: 0.5,
+            drag: 0.95,               
+            stopThreshold: 0.15,      // INCREASED: Starts snapping earlier while still moving slowly
+            snapSpeed: 0.08           // ADJUSTED: Slightly softer snap speed for blending
         };
 
         const state = {
@@ -312,14 +314,11 @@
 
         // --- RNG Initialization ---
         
-        // Calculate the biased probability immediately on load.
-        // Formula: Random float between 0.05 (5%) and 0.50 (50%).
         state.biasThreshold = 0.05 + (Math.random() * 0.45);
         
         console.group("🎲 D20 Simulator Debug Info");
         console.log("App loaded.");
         console.log(`Biased Mode Threshold: ${(state.biasThreshold * 100).toFixed(2)}%`);
-        console.log("If 'Biased' is selected, this is the chance of rolling a 20.");
         console.groupEnd();
 
         // --- Three.js Setup ---
@@ -329,12 +328,12 @@
         
         // Camera setup
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.z = 5; // Move camera back to see the dice
+        camera.position.z = 5; 
 
         // Renderer setup
         const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio); // Sharpness on mobile
+        renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(renderer.domElement);
 
         // Lighting
@@ -345,17 +344,17 @@
         dirLight.position.set(5, 5, 5);
         scene.add(dirLight);
 
-        const pointLight = new THREE.PointLight(0x4e8cff, 0.5); // Blue tint light
+        const pointLight = new THREE.PointLight(0xffaaaa, 0.5); // Warm tint light
         pointLight.position.set(-5, -5, 2);
         scene.add(pointLight);
 
         // The D20 Mesh (Icosahedron)
-        // Radius 1.5, detail 0 gives exactly 20 faces
-        const geometry = new THREE.IcosahedronGeometry(1.5, 0); 
+        // REDUCED SIZE: 1.5 * 0.75 = 1.125
+        const geometry = new THREE.IcosahedronGeometry(1.125, 0); 
         
-        // Material: Flat shading is crucial to see the "low poly" D20 look without a texture
+        // Material: Red Dice
         const material = new THREE.MeshStandardMaterial({ 
-            color: 0x222222, // Dark grey dice
+            color: 0xdd3333, // Red
             roughness: 0.4,
             metalness: 0.3,
             flatShading: true 
@@ -365,24 +364,17 @@
         scene.add(diceMesh);
 
         // Define the Face Normals for Snapping
-        // We need to know where the faces point to snap the dice correctly.
-        // Three.js geometries have face normals. We'll capture them relative to the unrotated mesh.
         let faceNormals = [];
         
         function calculateFaceNormals() {
-            // In modern Three.js, we access position attribute
             const pos = geometry.attributes.position;
-            const normal = new THREE.Vector3();
             const pA = new THREE.Vector3(), pB = new THREE.Vector3(), pC = new THREE.Vector3();
 
-            // Loop through every 3 vertices (a face)
             for (let i = 0; i < pos.count; i += 3) {
                 pA.fromBufferAttribute(pos, i + 0);
                 pB.fromBufferAttribute(pos, i + 1);
                 pC.fromBufferAttribute(pos, i + 2);
 
-                // Calculate triangle center or normal. 
-                // For Icosahedron centered at 0,0,0, the center of the face is also the normal direction.
                 const center = new THREE.Vector3().addVectors(pA, pB).add(pC).divideScalar(3).normalize();
                 faceNormals.push(center);
             }
@@ -397,58 +389,50 @@
         rollBtn.addEventListener('click', startRoll);
 
         function startRoll() {
-            if (state.isRolling || state.isSnapping) return; // Prevent double clicks
+            if (state.isRolling || state.isSnapping) return;
 
             console.log("Rolling...");
             
-            // 1. Reset UI
             resultDisplay.style.opacity = '0';
             state.isRolling = true;
             state.isSnapping = false;
             rollBtn.disabled = true;
 
-            // 2. Set Random Velocity (High speed)
             state.velocity.x = (Math.random() - 0.5) * config.rotationSpeedInitial * 4;
             state.velocity.y = (Math.random() - 0.5) * config.rotationSpeedInitial * 4;
             state.velocity.z = (Math.random() - 0.5) * config.rotationSpeedInitial * 4;
 
-            // Ensure it's spinning somewhat fast regardless of random
             if (Math.abs(state.velocity.x) < 0.1) state.velocity.x += 0.2;
         }
 
         // --- Animation Loop ---
 
-        // Target quaternion for snapping
         const targetQuaternion = new THREE.Quaternion();
 
         function animate() {
             requestAnimationFrame(animate);
 
             if (state.isRolling) {
-                // Apply rotation
                 diceMesh.rotation.x += state.velocity.x;
                 diceMesh.rotation.y += state.velocity.y;
                 diceMesh.rotation.z += state.velocity.z;
 
-                // Decelerate (Friction)
                 state.velocity.x *= config.drag;
                 state.velocity.y *= config.drag;
                 state.velocity.z *= config.drag;
 
-                // Check if stopped
                 const totalSpeed = Math.abs(state.velocity.x) + Math.abs(state.velocity.y) + Math.abs(state.velocity.z);
                 
+                // Trigger snap earlier (higher threshold) for smoother transition
                 if (totalSpeed < config.stopThreshold) {
                     state.isRolling = false;
                     prepareSnap();
                 }
             } 
             else if (state.isSnapping) {
-                // Smoothly rotate towards the target quaternion (Face Up)
-                // step is how fast we interpolate (0 to 1)
+                // Slerp blends the rotation smoothly
                 diceMesh.quaternion.slerp(targetQuaternion, config.snapSpeed);
 
-                // Check if close enough to target
                 if (diceMesh.quaternion.angleTo(targetQuaternion) < 0.01) {
                     state.isSnapping = false;
                     finishRoll();
@@ -463,44 +447,24 @@
 
         function prepareSnap() {
             state.isSnapping = true;
-
-            // 1. Get current rotation as quaternion
             const currentQuat = diceMesh.quaternion.clone();
-
-            // 2. We want to find which face is pointing closest to the camera.
-            // Camera looks down -Z axis. So we want the face normal that, when transformed by the object's rotation,
-            // has the largest Z component (closest to Z=1).
             
             let bestNormal = null;
-            let maxDot = -Infinity; // Dot product with (0,0,1) is just the z component
+            let maxDot = -Infinity;
 
             faceNormals.forEach(normal => {
-                // Apply current rotation to the standard face normal
                 const rotatedNormal = normal.clone().applyQuaternion(currentQuat);
-                
-                // Check alignment with camera vector (0, 0, 1)
                 const dot = rotatedNormal.z; 
 
                 if (dot > maxDot) {
                     maxDot = dot;
-                    bestNormal = normal; // Keep the original untransformed normal
+                    bestNormal = normal;
                 }
             });
 
-            // 3. Calculate rotation needed to bring 'bestNormal' to align with (0,0,1)
-            // Quaternion to rotate vector A to vector B
             const targetNormalWorld = new THREE.Vector3(0, 0, 1);
-            
-            // We need a quaternion that represents the "correction"
-            // The logic: Start with current rotation. Then add the rotation needed to move the face to center.
-            
-            // Re-calculate the current world position of that best normal
             const currentBestNormalWorld = bestNormal.clone().applyQuaternion(currentQuat);
-            
-            // Calculate quaternion required to rotate currentBestNormalWorld to targetNormalWorld
             const correctionQuat = new THREE.Quaternion().setFromUnitVectors(currentBestNormalWorld, targetNormalWorld);
-            
-            // Apply correction to current rotation
             targetQuaternion.copy(currentQuat).premultiply(correctionQuat);
         }
 
@@ -513,17 +477,11 @@
                 resultDisplay.innerText = result;
                 resultDisplay.style.opacity = '1';
                 
-                // Check critical hit visuals
-                if (result == 20) {
-                    resultDisplay.style.color = '#ffcc00'; // Gold
-                    resultDisplay.style.textShadow = '0 0 20px rgba(255, 204, 0, 0.5)';
-                } else if (result == 1) {
-                    resultDisplay.style.color = '#ff4444'; // Red
-                    resultDisplay.style.textShadow = '0 0 20px rgba(255, 68, 68, 0.5)';
-                } else {
-                    resultDisplay.style.color = '#ffffff';
-                    resultDisplay.style.textShadow = '0 4px 10px rgba(0,0,0,0.8)';
-                }
+                // Color Logic REMOVED per user request
+                // Always use default white text
+                resultDisplay.style.color = '#ffffff';
+                resultDisplay.style.textShadow = '0 4px 10px rgba(0,0,0,0.8)';
+                
             } else {
                 console.log("Blank mode selected. No number displayed.");
             }
@@ -547,15 +505,11 @@
             }
 
             if (mode === 'biased') {
-                // Biased Logic: 
-                // Check against the hidden threshold
                 const roll = Math.random();
                 if (roll < state.biasThreshold) {
                     console.log(`Biased Roll: RNG (${roll.toFixed(3)}) < Threshold (${state.biasThreshold.toFixed(3)}) -> FORCED 20`);
                     return 20;
                 } else {
-                    // Standard 1-19
-                    // We generate 1-19. (Math.random() * 19) gives 0 to 18.99. Ceil gives 1 to 19.
                     result = Math.ceil(Math.random() * 19);
                     console.log(`Biased Roll: RNG (${roll.toFixed(3)}) > Threshold. Rolling standard 1-19 -> ${result}`);
                     return result;
@@ -583,20 +537,16 @@
             settingsModal.style.display = 'none';
         });
 
-        // Close modal if clicking outside content
         settingsModal.addEventListener('click', (e) => {
             if (e.target === settingsModal) {
                 settingsModal.style.display = 'none';
             }
         });
 
-        // Handle Mode Selection
         radioButtons.forEach(radio => {
             radio.addEventListener('change', (e) => {
                 state.mode = e.target.value;
                 console.log(`Game Mode changed to: ${state.mode}`);
-                
-                // Clear current result when mode changes to avoid confusion
                 resultDisplay.style.opacity = '0';
             });
         });
