@@ -4,158 +4,236 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>D20 Simulator</title>
+    
+    <!-- Load Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
     <style>
-        /* --- CSS STYLING --- */
+        :root {
+            --primary-color: #4e8cff;
+            --bg-color: #1a1a1a;
+            --text-color: #ffffff;
+            --overlay-bg: rgba(0, 0, 0, 0.85);
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none; /* Prevent text selection during frantic tapping */
+            -webkit-tap-highlight-color: transparent;
+        }
+
         body {
             margin: 0;
-            overflow: hidden; /* Prevent scrolling */
-            background-color: #1a1a1a; /* Dark outer background */
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            touch-action: none; /* Disable default touch actions */
-        }
-
-        /* The 3D Container */
-        #canvas-container {
-            width: 100vw;
+            overflow: hidden; /* Prevent scrolling */
             height: 100vh;
-            display: block;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
-        /* UI Overlay Layer */
+        /* --- 3D Canvas Container --- */
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* --- UI Overlay Layer --- */
         #ui-layer {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            pointer-events: none; /* Let clicks pass through to canvas */
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through to canvas if needed, though we use buttons */
             display: flex;
             flex-direction: column;
             justify-content: space-between;
         }
 
-        /* Settings Button (Top Right) */
-        #settings-btn {
-            pointer-events: auto;
-            align-self: flex-end;
-            margin: 20px;
-            background: rgba(0, 0, 0, 0.5);
-            border: 2px solid white;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            cursor: pointer;
+        /* --- Top Bar --- */
+        .top-bar {
+            padding: 20px;
             display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 24px;
-            transition: transform 0.1s;
+            justify-content: flex-end;
+            pointer-events: auto;
         }
-        #settings-btn:active { transform: scale(0.9); }
 
-        /* Roll Button (Bottom Center) */
-        #roll-btn-container {
-            pointer-events: auto;
+        #settings-btn {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 10px;
+        }
+
+        #settings-btn svg {
+            width: 32px;
+            height: 32px;
+            fill: currentColor;
+            filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.5));
+        }
+
+        /* --- Center Result Display --- */
+        #result-display {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 6rem;
+            font-weight: bold;
+            text-shadow: 0 4px 10px rgba(0,0,0,0.8);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s ease-out;
+            z-index: 20;
+        }
+
+        /* --- Bottom Control --- */
+        .bottom-bar {
+            padding: 40px 20px;
             display: flex;
             justify-content: center;
-            margin-bottom: 50px;
+            pointer-events: auto;
+            margin-bottom: env(safe-area-inset-bottom);
         }
 
         #roll-btn {
-            background-color: #ff4444;
+            background-color: var(--primary-color);
             color: white;
-            border: 4px solid #fff;
-            padding: 15px 40px;
+            border: none;
+            border-radius: 50px;
+            padding: 15px 60px;
             font-size: 1.5rem;
-            font-weight: bold;
-            border-radius: 30px;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(78, 140, 255, 0.4);
             cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            transition: background 0.2s, transform 0.1s;
-        }
-        #roll-btn:active {
-            background-color: #cc0000;
-            transform: scale(0.95);
+            transition: transform 0.1s, background-color 0.2s;
         }
 
-        /* Settings Modal Overlay */
+        #roll-btn:active {
+            transform: scale(0.95);
+            background-color: #3a75e0;
+        }
+
+        #roll-btn:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        /* --- Settings Modal --- */
         #settings-modal {
+            display: none; /* Hidden by default */
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.85);
-            display: none; /* Hidden by default */
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            background-color: var(--overlay-bg);
+            z-index: 100;
             pointer-events: auto;
-            z-index: 10;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
         }
 
         .modal-content {
-            background: #333;
+            background-color: #2a2a2a;
             padding: 30px;
-            border-radius: 15px;
-            text-align: center;
-            color: white;
-            width: 80%;
-            max-width: 300px;
-            border: 2px solid #555;
+            border-radius: 16px;
+            width: 85%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
         }
 
-        .modal-content h2 { margin-top: 0; }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+        }
 
-        .option-btn {
-            display: block;
-            width: 100%;
-            padding: 12px;
-            margin: 10px 0;
-            background: #444;
-            color: white;
-            border: 1px solid #666;
-            border-radius: 8px;
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: #aaa;
+            font-size: 2rem;
             cursor: pointer;
-            font-size: 1rem;
-        }
-        
-        .option-btn.active {
-            background-color: #2e8b57; /* Matches board green */
-            border-color: #4ade80;
-            font-weight: bold;
+            padding: 0;
+            line-height: 1;
         }
 
-        #close-modal {
-            margin-top: 20px;
-            background: transparent;
-            border: 1px solid #888;
-            color: #ccc;
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .radio-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-size: 1.1rem;
+            padding: 10px;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        .radio-label:hover {
+            background-color: #333;
+        }
+
+        .radio-label input {
+            margin-right: 15px;
+            transform: scale(1.3);
+        }
+
+        .description {
+            display: block;
+            font-size: 0.85rem;
+            color: #888;
+            margin-top: 4px;
+            margin-left: 30px;
         }
     </style>
-    
-    <!-- Import Maps -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
-            }
-        }
-    </script>
 </head>
 <body>
 
-    <!-- 3D Canvas Container -->
+    <!-- 3D Scene Container -->
     <div id="canvas-container"></div>
 
-    <!-- UI Layer -->
+    <!-- UI Overlay -->
     <div id="ui-layer">
-        <button id="settings-btn" aria-label="Settings">⚙️</button>
-        <div id="roll-btn-container">
+        <div class="top-bar">
+            <button id="settings-btn" aria-label="Settings">
+                <!-- Gear Icon SVG -->
+                <svg viewBox="0 0 24 24">
+                    <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- The number result appears here -->
+        <div id="result-display">20</div>
+
+        <div class="bottom-bar">
             <button id="roll-btn">Roll</button>
         </div>
     </div>
@@ -163,414 +241,373 @@
     <!-- Settings Modal -->
     <div id="settings-modal">
         <div class="modal-content">
-            <h2>Dice Settings</h2>
-            <button class="option-btn active" data-type="standard">Standard (1-20)</button>
-            <button class="option-btn" data-type="blank">Blank (No Numbers)</button>
-            <button class="option-btn" data-type="fixed">Fixed (All 20s)</button>
-            <button id="close-modal" class="option-btn">Close</button>
+            <div class="modal-header">
+                <h2>Dice Settings</h2>
+                <button class="close-btn" id="close-settings">&times;</button>
+            </div>
+            
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="diceMode" value="standard" checked>
+                    <div>
+                        Standard
+                        <span class="description">Fair 1-20 roll</span>
+                    </div>
+                </label>
+
+                <label class="radio-label">
+                    <input type="radio" name="diceMode" value="blank">
+                    <div>
+                        Blank
+                        <span class="description">No number appears</span>
+                    </div>
+                </label>
+
+                <label class="radio-label">
+                    <input type="radio" name="diceMode" value="always20">
+                    <div>
+                        Always 20
+                        <span class="description">Guaranteed critical hit</span>
+                    </div>
+                </label>
+
+                <label class="radio-label">
+                    <input type="radio" name="diceMode" value="biased">
+                    <div>
+                        Biased
+                        <span class="description">Randomly favors 20 (5-50%)</span>
+                    </div>
+                </label>
+            </div>
         </div>
     </div>
 
-    <!-- Application Script -->
-    <script type="module">
-        import * as THREE from 'three';
-        import * as CANNON from 'cannon-es';
+    <!-- Main Application Logic -->
+    <script>
+        /**
+         * D20 Simulator Logic
+         * * Overview:
+         * 1. Sets up a Three.js scene with a standard Icosahedron (D20 shape).
+         * 2. Handles the animation loop (Roll -> Decelerate -> Snap to Face).
+         * 3. Calculates RNG based on selected mode.
+         * 4. Manages UI overlays.
+         */
 
-        // --- CONFIGURATION ---
-        const CONFIG = {
-            colors: {
-                board: 0x2e8b57,  
-                dice: 0xcc0000,   
-                text: 'white',
-            },
-            physics: {
-                gravity: -45,     // Strong gravity
-                restitution: 0.6, // Bounciness
-                friction: 0.3     // Friction
-            },
-            diceRadius: 1.5,
-            textureSize: 1024
+        // --- Configuration & State ---
+        const config = {
+            rotationSpeedInitial: 0.5, // How fast it starts spinning
+            drag: 0.95,               // Deceleration factor (0.99 = slow stop, 0.90 = fast stop)
+            stopThreshold: 0.01,      // Speed at which we consider the dice "stopped"
+            snapSpeed: 0.1            // How fast it snaps to the nearest face at the end
         };
 
-        // --- VARIABLES ---
-        let scene, camera, renderer;
-        let world, floorBody;
-        let diceMesh = null;
-        let diceBody = null;
-        let walls = [];
-        let currentDiceType = 'standard';
+        const state = {
+            mode: 'standard', // standard, blank, always20, biased
+            isRolling: false,
+            isSnapping: false,
+            velocity: { x: 0, y: 0, z: 0 },
+            biasThreshold: 0, // Calculated on load
+            currentNumber: null
+        };
+
+        // --- RNG Initialization ---
         
-        // Raycaster for accurate wall placement
-        const raycaster = new THREE.Raycaster();
-        const planeMath = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // Horizontal plane at y=0
+        // Calculate the biased probability immediately on load.
+        // Formula: Random float between 0.05 (5%) and 0.50 (50%).
+        state.biasThreshold = 0.05 + (Math.random() * 0.45);
+        
+        console.group("🎲 D20 Simulator Debug Info");
+        console.log("App loaded.");
+        console.log(`Biased Mode Threshold: ${(state.biasThreshold * 100).toFixed(2)}%`);
+        console.log("If 'Biased' is selected, this is the chance of rolling a 20.");
+        console.groupEnd();
 
-        // --- INIT ---
-        function init() {
-            // 1. Three.js Setup
-            const container = document.getElementById('canvas-container');
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(CONFIG.colors.board);
+        // --- Three.js Setup ---
 
-            const aspect = window.innerWidth / window.innerHeight;
-            camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 500);
-            camera.position.set(0, 40, 15); // High angle
-            camera.lookAt(0, 0, 0);
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        
+        // Camera setup
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.z = 5; // Move camera back to see the dice
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            container.appendChild(renderer.domElement);
+        // Renderer setup
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio); // Sharpness on mobile
+        container.appendChild(renderer.domElement);
 
-            // 2. Lighting
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(10, 50, 20);
-            dirLight.castShadow = true;
-            dirLight.shadow.mapSize.width = 2048;
-            dirLight.shadow.mapSize.height = 2048;
-            dirLight.shadow.camera.left = -20;
-            dirLight.shadow.camera.right = 20;
-            dirLight.shadow.camera.top = 20;
-            dirLight.shadow.camera.bottom = -20;
-            scene.add(dirLight);
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
 
-            // 3. Physics Setup
-            world = new CANNON.World();
-            world.gravity.set(0, CONFIG.physics.gravity, 0);
-            world.broadphase = new CANNON.NaiveBroadphase();
-            world.solver.iterations = 20; // High iterations for stability
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 5, 5);
+        scene.add(dirLight);
 
-            // Materials
-            const diceMat = new CANNON.Material();
-            const wallMat = new CANNON.Material();
-            
-            const contactMat = new CANNON.ContactMaterial(wallMat, diceMat, {
-                friction: CONFIG.physics.friction,
-                restitution: CONFIG.physics.restitution
-            });
-            world.addContactMaterial(contactMat);
+        const pointLight = new THREE.PointLight(0x4e8cff, 0.5); // Blue tint light
+        pointLight.position.set(-5, -5, 2);
+        scene.add(pointLight);
 
-            // 4. Floor (Physics)
-            const floorShape = new CANNON.Plane();
-            floorBody = new CANNON.Body({ mass: 0, material: wallMat });
-            floorBody.addShape(floorShape);
-            floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-            world.addBody(floorBody);
+        // The D20 Mesh (Icosahedron)
+        // Radius 1.5, detail 0 gives exactly 20 faces
+        const geometry = new THREE.IcosahedronGeometry(1.5, 0); 
+        
+        // Material: Flat shading is crucial to see the "low poly" D20 look without a texture
+        const material = new THREE.MeshStandardMaterial({ 
+            color: 0x222222, // Dark grey dice
+            roughness: 0.4,
+            metalness: 0.3,
+            flatShading: true 
+        });
 
-            // Floor (Visual Shadow Catcher)
-            const shadowPlane = new THREE.Mesh(
-                new THREE.PlaneGeometry(200, 200),
-                new THREE.ShadowMaterial({ opacity: 0.4 })
-            );
-            shadowPlane.rotation.x = -Math.PI / 2;
-            shadowPlane.receiveShadow = true;
-            scene.add(shadowPlane);
+        const diceMesh = new THREE.Mesh(geometry, material);
+        scene.add(diceMesh);
 
-            // 5. Walls & Events
-            updateWalls(wallMat); // Initial Wall Setup
-            
-            window.addEventListener('resize', () => {
-                onWindowResize();
-                updateWalls(wallMat);
-            });
-
-            document.getElementById('roll-btn').addEventListener('click', rollDice);
-            setupUI();
-
-            animate();
-        }
-
-        // --- WALL GENERATION (RAYCASTING) ---
-        function updateWalls(material) {
-            // Remove old walls
-            walls.forEach(b => world.removeBody(b));
-            walls = [];
-
-            // We cast rays from the 4 corners of the screen to the floor plane (y=0)
-            // to find the exact visible boundary.
-            const corners = [
-                { x: -1, y: 1 },  // Top Left
-                { x: 1, y: 1 },   // Top Right
-                { x: -1, y: -1 }, // Bottom Left
-                { x: 1, y: -1 }   // Bottom Right
-            ];
-
-            const points = corners.map(ndc => {
-                raycaster.setFromCamera(new THREE.Vector2(ndc.x, ndc.y), camera);
-                const target = new THREE.Vector3();
-                raycaster.ray.intersectPlane(planeMath, target);
-                return target; // Vector3 intersection with y=0
-            });
-
-            // Points order: TL, TR, BL, BR
-            // Note: Camera is at z=15 looking at z=0. 
-            // Top of screen is "far" (negative Z in view), Bottom is "near" (positive Z).
-            // Actually, with camera.lookAt(0,0,0) from (0,40,15), 
-            // the floor intersection geometry is a trapezoid.
-            
-            // To make a safe box, we find the min/max X and Z.
-            // But a simple rectangular box might cut off corners of the trapezoid or leave gaps.
-            // For a mobile phone "box" feel, we want walls at the Left, Right, Top, Bottom edges.
-            
-            const wallThickness = 50; // Very thick to prevent tunneling
-            const wallHeight = 1000;  // Infinite height effect
-
-            // Left Wall (Midpoint of TL and BL x)
-            // We take the inner-most bounds to ensure nothing leaves screen
-            // Actually, raycast gives exact edge.
-            
-            // We'll create 4 box walls oriented to match the average edges.
-            // For simplicity in this perspective, we will take the max/min bounds 
-            // and maybe angle them if we wanted perfection, but Axis Aligned walls are safer for physics.
-            
-            // Calculate Min/Max X and Z to form a bounding box
-            // Note: This approximates the trapezoid as a rectangle, which might mean 
-            // some floor is off screen or some screen has no floor. 
-            // Given the high camera angle, a rectangle is a "good enough" approximation 
-            // if we use the wider bottom or narrower top?
-            // Let's use the intersection points directly to place walls.
-            
-            // Left Wall: Average X of Left side
-            const leftX = (points[0].x + points[2].x) / 2;
-            const rightX = (points[1].x + points[3].x) / 2;
-            
-            // Top Wall (Far): Average Z of Top side
-            const topZ = (points[0].z + points[1].z) / 2;
-            // Bottom Wall (Near): Average Z of Bottom side
-            const bottomZ = (points[2].z + points[3].z) / 2;
-
-            const width = Math.abs(rightX - leftX);
-            const depth = Math.abs(bottomZ - topZ);
-            const centerX = (leftX + rightX) / 2;
-            const centerZ = (topZ + bottomZ) / 2;
-
-            // Define walls relative to center
-            const wallDefs = [
-                // Right
-                { 
-                    pos: [rightX + wallThickness/2, wallHeight/2, centerZ], 
-                    size: [wallThickness, wallHeight, depth + 20] 
-                },
-                // Left
-                { 
-                    pos: [leftX - wallThickness/2, wallHeight/2, centerZ], 
-                    size: [wallThickness, wallHeight, depth + 20] 
-                },
-                // Top (Far)
-                { 
-                    pos: [centerX, wallHeight/2, topZ - wallThickness/2], 
-                    size: [width + 20, wallHeight, wallThickness] 
-                },
-                // Bottom (Near)
-                { 
-                    pos: [centerX, wallHeight/2, bottomZ + wallThickness/2], 
-                    size: [width + 20, wallHeight, wallThickness] 
-                }
-            ];
-
-            wallDefs.forEach(def => {
-                const shape = new CANNON.Box(new CANNON.Vec3(def.size[0]/2, def.size[1]/2, def.size[2]/2));
-                const body = new CANNON.Body({ mass: 0, material: material });
-                body.position.set(...def.pos);
-                body.addShape(shape);
-                world.addBody(body);
-                walls.push(body);
-            });
-        }
-
-        // --- TEXTURE GENERATION ---
-        function createDiceTexture(type) {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const size = CONFIG.textureSize;
-            const cols = 5; 
-            const rows = 4;
-            const cellW = size / cols;
-            const cellH = size / rows;
-
-            canvas.width = size;
-            canvas.height = size;
-
-            // Background
-            ctx.fillStyle = '#cc0000';
-            ctx.fillRect(0, 0, size, size);
-
-            if (type === 'blank') return new THREE.CanvasTexture(canvas);
-
-            ctx.fillStyle = CONFIG.colors.text;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            const fontSize = cellW * 0.35; 
-            ctx.font = `bold ${fontSize}px Arial`;
-
-            for (let i = 0; i < 20; i++) {
-                const col = i % cols;
-                const row = Math.floor(i / cols);
-                const cx = col * cellW + cellW / 2;
-                const cy = row * cellH + cellH / 2;
-
-                let num = (i + 1).toString();
-                if (type === 'fixed') num = '20';
-                if (num === '6' || num === '9') num += '.';
-
-                ctx.save();
-                ctx.translate(cx, cy);
-                
-                // --- FIX: MIRROR TEXT ---
-                // We scale X by -1 to flip the text horizontally.
-                // This counteracts the UV mapping mirroring.
-                ctx.scale(-1, 1); 
-                
-                ctx.fillText(num, 0, 0);
-                ctx.restore();
-            }
-
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.colorSpace = THREE.SRGBColorSpace;
-            return tex;
-        }
-
-        // --- DICE LOGIC ---
-        function createDice() {
-            if (diceMesh) {
-                scene.remove(diceMesh);
-                diceMesh.geometry.dispose();
-                diceMesh.material.dispose();
-                world.removeBody(diceBody);
-            }
-
-            // Geometry & UVs
-            const geometry = new THREE.IcosahedronGeometry(CONFIG.diceRadius, 0).toNonIndexed();
+        // Define the Face Normals for Snapping
+        // We need to know where the faces point to snap the dice correctly.
+        // Three.js geometries have face normals. We'll capture them relative to the unrotated mesh.
+        let faceNormals = [];
+        
+        function calculateFaceNormals() {
+            // In modern Three.js, we access position attribute
             const pos = geometry.attributes.position;
-            const uvs = geometry.attributes.uv;
-            
-            const cols = 5;
-            const uStep = 1 / cols;
-            const vStep = 1 / 4;
+            const normal = new THREE.Vector3();
+            const pA = new THREE.Vector3(), pB = new THREE.Vector3(), pC = new THREE.Vector3();
 
+            // Loop through every 3 vertices (a face)
             for (let i = 0; i < pos.count; i += 3) {
-                const faceIndex = i / 3;
-                const col = faceIndex % cols;
-                const row = Math.floor(faceIndex / cols);
+                pA.fromBufferAttribute(pos, i + 0);
+                pB.fromBufferAttribute(pos, i + 1);
+                pC.fromBufferAttribute(pos, i + 2);
 
-                const cU = col * uStep + uStep / 2;
-                const cV = 1 - (row * vStep + vStep / 2);
-                const r = uStep * 0.4; 
-
-                // Triangle mapping inside grid cell
-                uvs.setXY(i,     cU, cV + r);           // Top
-                uvs.setXY(i + 1, cU + r * 0.866, cV - r * 0.5); // Bottom Right
-                uvs.setXY(i + 2, cU - r * 0.866, cV - r * 0.5); // Bottom Left
+                // Calculate triangle center or normal. 
+                // For Icosahedron centered at 0,0,0, the center of the face is also the normal direction.
+                const center = new THREE.Vector3().addVectors(pA, pB).add(pC).divideScalar(3).normalize();
+                faceNormals.push(center);
             }
-            geometry.attributes.uv.needsUpdate = true;
-            geometry.computeVertexNormals();
+        }
+        calculateFaceNormals();
 
-            // Mesh
-            const material = new THREE.MeshStandardMaterial({
-                map: createDiceTexture(currentDiceType),
-                color: 0xffffff,
-                roughness: 0.1,
-                metalness: 0.0,
-                flatShading: true
-            });
-            diceMesh = new THREE.Mesh(geometry, material);
-            diceMesh.castShadow = true;
-            diceMesh.receiveShadow = true;
-            scene.add(diceMesh);
+        // --- Interaction Logic ---
 
-            // Physics Body (Convex Hull)
-            const vertices = [];
-            for (let i = 0; i < pos.count; i++) {
-                vertices.push(new CANNON.Vec3(pos.getX(i), pos.getY(i), pos.getZ(i)));
-            }
-            // Generate simplified faces list for Cannon (0,1,2 for every triplet)
-            const faces = [];
-            for (let i = 0; i < pos.count; i += 3) {
-                faces.push([i, i+1, i+2]);
-            }
+        const rollBtn = document.getElementById('roll-btn');
+        const resultDisplay = document.getElementById('result-display');
+        
+        rollBtn.addEventListener('click', startRoll);
 
-            // Use exact geometry vertices for physics shape
-            const shape = new CANNON.ConvexPolyhedron({ vertices, faces });
+        function startRoll() {
+            if (state.isRolling || state.isSnapping) return; // Prevent double clicks
+
+            console.log("Rolling...");
             
-            diceBody = new CANNON.Body({
-                mass: 5,
-                shape: shape,
-                material: world.defaultContactMaterial.materials[1] 
-            });
-            world.addBody(diceBody);
+            // 1. Reset UI
+            resultDisplay.style.opacity = '0';
+            state.isRolling = true;
+            state.isSnapping = false;
+            rollBtn.disabled = true;
+
+            // 2. Set Random Velocity (High speed)
+            state.velocity.x = (Math.random() - 0.5) * config.rotationSpeedInitial * 4;
+            state.velocity.y = (Math.random() - 0.5) * config.rotationSpeedInitial * 4;
+            state.velocity.z = (Math.random() - 0.5) * config.rotationSpeedInitial * 4;
+
+            // Ensure it's spinning somewhat fast regardless of random
+            if (Math.abs(state.velocity.x) < 0.1) state.velocity.x += 0.2;
         }
 
-        function rollDice() {
-            // Recreate dice ensures fresh state
-            createDice();
+        // --- Animation Loop ---
 
-            // Calculate start position: Bottom center of visible area
-            // We use raycaster logic again to find "Bottom" Z
-            const target = new THREE.Vector3();
-            raycaster.setFromCamera(new THREE.Vector2(0, -0.8), camera); // 0.8 down screen
-            raycaster.ray.intersectPlane(planeMath, target);
-            
-            // Start position
-            diceBody.position.set(0, 5, target.z);
-            diceBody.velocity.set(0,0,0);
-            diceBody.angularVelocity.set(0,0,0);
-
-            // Forces
-            // Throw UP (+Y) and INTO SCREEN (-Z)
-            const rX = (Math.random() - 0.5) * 25; 
-            const rY = 50 + Math.random() * 20;
-            const rZ = -(40 + Math.random() * 20); // Throw towards -Z (top of screen)
-
-            diceBody.velocity.set(rX, rY, rZ);
-
-            // Spin
-            const spin = 35;
-            diceBody.angularVelocity.set(
-                (Math.random() - 0.5) * spin,
-                (Math.random() - 0.5) * spin,
-                (Math.random() - 0.5) * spin
-            );
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+        // Target quaternion for snapping
+        const targetQuaternion = new THREE.Quaternion();
 
         function animate() {
             requestAnimationFrame(animate);
-            world.step(1 / 60);
-            if (diceMesh && diceBody) {
-                diceMesh.position.copy(diceBody.position);
-                diceMesh.quaternion.copy(diceBody.quaternion);
+
+            if (state.isRolling) {
+                // Apply rotation
+                diceMesh.rotation.x += state.velocity.x;
+                diceMesh.rotation.y += state.velocity.y;
+                diceMesh.rotation.z += state.velocity.z;
+
+                // Decelerate (Friction)
+                state.velocity.x *= config.drag;
+                state.velocity.y *= config.drag;
+                state.velocity.z *= config.drag;
+
+                // Check if stopped
+                const totalSpeed = Math.abs(state.velocity.x) + Math.abs(state.velocity.y) + Math.abs(state.velocity.z);
+                
+                if (totalSpeed < config.stopThreshold) {
+                    state.isRolling = false;
+                    prepareSnap();
+                }
+            } 
+            else if (state.isSnapping) {
+                // Smoothly rotate towards the target quaternion (Face Up)
+                // step is how fast we interpolate (0 to 1)
+                diceMesh.quaternion.slerp(targetQuaternion, config.snapSpeed);
+
+                // Check if close enough to target
+                if (diceMesh.quaternion.angleTo(targetQuaternion) < 0.01) {
+                    state.isSnapping = false;
+                    finishRoll();
+                }
             }
+
             renderer.render(scene, camera);
         }
+        animate();
 
-        function setupUI() {
-            const settingsBtn = document.getElementById('settings-btn');
-            const modal = document.getElementById('settings-modal');
-            const closeBtn = document.getElementById('close-modal');
-            const options = document.querySelectorAll('.option-btn[data-type]');
+        // --- Snapping Logic ---
 
-            settingsBtn.addEventListener('click', () => { modal.style.display = 'flex'; });
-            closeBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+        function prepareSnap() {
+            state.isSnapping = true;
 
-            options.forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    options.forEach(b => b.classList.remove('active'));
-                    e.target.classList.add('active');
-                    currentDiceType = e.target.dataset.type;
-                });
+            // 1. Get current rotation as quaternion
+            const currentQuat = diceMesh.quaternion.clone();
+
+            // 2. We want to find which face is pointing closest to the camera.
+            // Camera looks down -Z axis. So we want the face normal that, when transformed by the object's rotation,
+            // has the largest Z component (closest to Z=1).
+            
+            let bestNormal = null;
+            let maxDot = -Infinity; // Dot product with (0,0,1) is just the z component
+
+            faceNormals.forEach(normal => {
+                // Apply current rotation to the standard face normal
+                const rotatedNormal = normal.clone().applyQuaternion(currentQuat);
+                
+                // Check alignment with camera vector (0, 0, 1)
+                const dot = rotatedNormal.z; 
+
+                if (dot > maxDot) {
+                    maxDot = dot;
+                    bestNormal = normal; // Keep the original untransformed normal
+                }
             });
-            modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+            // 3. Calculate rotation needed to bring 'bestNormal' to align with (0,0,1)
+            // Quaternion to rotate vector A to vector B
+            const targetNormalWorld = new THREE.Vector3(0, 0, 1);
+            
+            // We need a quaternion that represents the "correction"
+            // The logic: Start with current rotation. Then add the rotation needed to move the face to center.
+            
+            // Re-calculate the current world position of that best normal
+            const currentBestNormalWorld = bestNormal.clone().applyQuaternion(currentQuat);
+            
+            // Calculate quaternion required to rotate currentBestNormalWorld to targetNormalWorld
+            const correctionQuat = new THREE.Quaternion().setFromUnitVectors(currentBestNormalWorld, targetNormalWorld);
+            
+            // Apply correction to current rotation
+            targetQuaternion.copy(currentQuat).premultiply(correctionQuat);
         }
 
-        init();
+        function finishRoll() {
+            console.log("Roll finished. Calculating result...");
+            
+            const result = calculateResult();
+            
+            if (result !== null) {
+                resultDisplay.innerText = result;
+                resultDisplay.style.opacity = '1';
+                
+                // Check critical hit visuals
+                if (result == 20) {
+                    resultDisplay.style.color = '#ffcc00'; // Gold
+                    resultDisplay.style.textShadow = '0 0 20px rgba(255, 204, 0, 0.5)';
+                } else if (result == 1) {
+                    resultDisplay.style.color = '#ff4444'; // Red
+                    resultDisplay.style.textShadow = '0 0 20px rgba(255, 68, 68, 0.5)';
+                } else {
+                    resultDisplay.style.color = '#ffffff';
+                    resultDisplay.style.textShadow = '0 4px 10px rgba(0,0,0,0.8)';
+                }
+            } else {
+                console.log("Blank mode selected. No number displayed.");
+            }
+
+            rollBtn.disabled = false;
+        }
+
+        // --- Probability Logic ---
+
+        function calculateResult() {
+            const mode = state.mode;
+            let result;
+
+            if (mode === 'blank') {
+                return null;
+            }
+
+            if (mode === 'always20') {
+                console.log("Mode: Always 20");
+                return 20;
+            }
+
+            if (mode === 'biased') {
+                // Biased Logic: 
+                // Check against the hidden threshold
+                const roll = Math.random();
+                if (roll < state.biasThreshold) {
+                    console.log(`Biased Roll: RNG (${roll.toFixed(3)}) < Threshold (${state.biasThreshold.toFixed(3)}) -> FORCED 20`);
+                    return 20;
+                } else {
+                    // Standard 1-19
+                    // We generate 1-19. (Math.random() * 19) gives 0 to 18.99. Ceil gives 1 to 19.
+                    result = Math.ceil(Math.random() * 19);
+                    console.log(`Biased Roll: RNG (${roll.toFixed(3)}) > Threshold. Rolling standard 1-19 -> ${result}`);
+                    return result;
+                }
+            }
+
+            // Standard Logic
+            result = Math.ceil(Math.random() * 20);
+            console.log(`Standard Roll: ${result}`);
+            return result;
+        }
+
+        // --- Settings Menu Logic ---
+
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsModal = document.getElementById('settings-modal');
+        const closeSettingsBtn = document.getElementById('close-settings');
+        const radioButtons = document.querySelectorAll('input[name="diceMode"]');
+
+        settingsBtn.addEventListener('click', () => {
+            settingsModal.style.display = 'flex';
+        });
+
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsModal.style.display = 'none';
+        });
+
+        // Close modal if clicking outside content
+        settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) {
+                settingsModal.style.display = 'none';
+            }
+        });
+
+        // Handle Mode Selection
+        radioButtons.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                state.mode = e.target.value;
+                console.log(`Game Mode changed to: ${state.mode}`);
+                
+                // Clear current result when mode changes to avoid confusion
+                resultDisplay.style.opacity = '0';
+            });
+        });
+
+        // --- Resize Handler ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
     </script>
 </body>
 </html>
-
-
