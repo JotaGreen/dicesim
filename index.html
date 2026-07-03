@@ -277,7 +277,7 @@
                     <input type="radio" name="diceMode" value="biased" checked>
                     <div>
                         Biased
-                        <span class="description">Randomly favors 20 (5-50%)</span>
+                        <span class="description">Randomly favors 20 (5-40%)</span>
                     </div>
                 </label>
             </div>
@@ -314,7 +314,7 @@
 
         // --- RNG Initialization ---
         
-        state.biasThreshold = 0.05 + (Math.random() * 0.45);
+        state.biasThreshold = 0.05 + (Math.random() * 0.35);
         
         console.group("🎲 D20 Simulator Debug Info");
         console.log("App loaded.");
